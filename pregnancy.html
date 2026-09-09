@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>New Pregnancy | SwasthyaSaathi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app-shell" id="appShellRoot">
+  <main class="main-content">
+    <div id="pageContent">
+      <div class="page-header">
+        <h1 class="text-page-title" data-i18n="pregnancy_title">New Pregnancy Registration</h1>
+        <div class="disclaimer-bar" style="margin-top:12px;">
+          <span id="disclaimerIcon"></span>
+          <span data-i18n="disclaimer_full"></span>
+        </div>
+      </div>
+
+      <div class="page-body">
+        <div class="step-progress" id="stepProgress" style="margin-bottom:24px;"></div>
+
+        <form id="pregForm">
+          <div class="card card-pad" id="stepPanels"></div>
+
+          <div class="sticky-actions">
+            <button type="button" class="btn btn-secondary" id="btnBack" data-i18n="back">Back</button>
+            <button type="button" class="btn btn-primary" id="btnNext" data-i18n="next">Continue</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/translations.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/risk-engine.js"></script>
+<script src="js/offline.js"></script>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script>
+const session = APP.mountShell('pregnancy', ['asha','anm']);
+if(session){
+
+document.getElementById('disclaimerIcon').innerHTML = ICONS.info;
+
+const STEPS = ['step_mother','step_pregnancy','step_vitals','step_history','step_warning','step_risk','step_save'];
+let current = 0;
+const state = { beneficiary:{}, pregnancy:{}, vitals:{}, observations:{}, history:{}, warningSigns:{}, riskResult:null };
+
+function renderStepper(){
+  document.getElementById('stepProgress').innerHTML = STEPS.map((s,i)=>`
+    <div class="step-dot ${i===current?'active':''} ${i<current?'done':''}">
+      <div class="step-num">${i<current? '✓' : String(i+1).padStart(2,'0')}</div>
+      <span class="step-label" data-i18n="${s}">${I18N.t(s)}</span>
+    </div>
+    ${i<STEPS.length-1 ? '<div class="step-line"></div>' : ''}
+  `).join('');
+}
+
+function fieldHTML(id, labelKey, type, opts){
+  opts = opts || {};
+  const unit = opts.unit ? `<div class="input-unit"><input type="${type}" id="${id}" ${opts.attrs||''}><span class="unit">${opts.unit}</span></div>` :
+    `<input type="${type}" id="${id}" ${opts.attrs||''}>`;
+  return `<div class="field"><label for="${id}" data-i18n="${labelKey}">${I18N.t(labelKey)}</label>${unit}
+    ${opts.hint ? `<div class="hint">${opts.hint}</div>` : ''}</div>`;
+}
+
+function checkboxRow(id, labelKey, warn){
+  return `<label class="checkbox-row ${warn?'warn':''}" for="${id}">
+    <input type="checkbox" id="${id}"><span data-i18n="${labelKey}">${I18N.t(labelKey)}</span>
+  </label>`;
+}
+
+function panelHTML(step){
+  switch(step){
+    case 0: return `
+      <h3 class="text-section-title" style="margin-bottom:16px;" data-i18n="step_mother">${I18N.t('step_mother')}</h3>
+      <div class="form-grid cols-2">
+        ${fieldHTML('b_name','name','text',{attrs:'required'})}
+        ${fieldHTML('b_age','age','number',{unit:I18N.t('years_short'),attrs:'required min=15 max=49'})}
+        ${fieldHTML('b_mobile','mobile_number','tel',{attrs:'maxlength=10 inputmode=numeric'})}
+        ${fieldHTML('b_id','beneficiary_id','text',{attrs:'placeholder="Auto-generated if left blank"'})}
+        ${fieldHTML('b_district','district','text',{attrs:'required'})}
+        ${fieldHTML('b_block','block','text',{attrs:'required'})}
+        ${fieldHTML('b_village','village','text',{attrs:'required'})}
+        ${fieldHTML('b_area','area','text',{})}
+      </div>`;
+    case 1: return `
+      <h3 class="text-section-title" style="margin-bottom:16px;" data-i18n="step_pregnancy">${I18N.t('step_pregnancy')}</h3>
+      <div class="form-grid cols-2">
+        ${fieldHTML('p_lmp','lmp','date',{attrs:'required'})}
+        <div class="field">
+          <label data-i18n="gestational_age">${I18N.t('gestational_age')}</label>
+          <input type="text" id="p_ga" disabled>
+          <div class="hint" data-i18n="calculated">${I18N.t('calculated')}</div>
+        </div>
+        <div class="field">
+          <label data-i18n="edd">${I18N.t('edd')}</label>
+          <input type="text" id="p_edd" disabled>
+          <div class="hint" data-i18n="calculated">${I18N.t('calculated')}</div>
+        </div>
+        <div class="field">
+          <label data-i18n="trimester">${I18N.t('trimester')}</label>
+          <input type="text" id="p_trimester" disabled>
+        </div>
+        ${fieldHTML('p_gravida','gravida','number',{attrs:'min=1 max=15'})}
+        ${fieldHTML('p_para','para','number',{attrs:'min=0 max=15'})}
+      </div>
+      <div class="checkbox-grid" style="margin-top:8px;">
+        ${checkboxRow('p_csection','prev_csection')}
+        ${checkboxRow('p_complications','prev_complications')}
+      </div>`;
+    case 2: return `
+      <h3 class="text-section-title" style="margin-bottom:16px;" data-i18n="step_vitals">${I18N.t('step_vitals')}</h3>
+      <div class="form-grid cols-2">
+        ${fieldHTML('v_sbp','systolic_bp','number',{unit:'mmHg'})}
+        ${fieldHTML('v_dbp','diastolic_bp','number',{unit:'mmHg'})}
+        ${fieldHTML('v_pulse','pulse','number',{unit:'bpm'})}
+        ${fieldHTML('v_temp','temperature','number',{unit:'°F',attrs:'step=0.1'})}
+        ${fieldHTML('v_weight','weight','number',{unit:'kg',attrs:'step=0.1'})}
+        ${fieldHTML('v_hb','haemoglobin','number',{unit:'g/dL',attrs:'step=0.1'})}
+        ${fieldHTML('v_glucose','blood_glucose','number',{unit:'mg/dL'})}
+      </div>
+      <h3 class="text-section-title" style="margin:20px 0 16px;">Observations</h3>
+      <div class="form-grid cols-2">
+        ${fieldHTML('o_fetal_movement','fetal_movement','text',{})}
+        ${fieldHTML('o_fundal_height','fundal_height','number',{unit:'cm'})}
+        ${fieldHTML('o_fhr','fetal_heart_rate','number',{unit:'bpm'})}
+      </div>`;
+    case 3: return `
+      <h3 class="text-section-title" style="margin-bottom:16px;" data-i18n="medical_history">${I18N.t('medical_history')}</h3>
+      <div class="checkbox-grid">
+        ${checkboxRow('h_hypertension','h_hypertension')}
+        ${checkboxRow('h_diabetes','h_diabetes')}
+        ${checkboxRow('h_anaemia','h_anaemia')}
+        ${checkboxRow('h_csection','h_prev_csection')}
+        ${checkboxRow('h_complications','h_prev_complications')}
+        ${checkboxRow('h_stillbirth','h_stillbirth')}
+        ${checkboxRow('h_miscarriage','h_miscarriage')}
+        ${checkboxRow('h_pph','h_pph')}
+        ${checkboxRow('h_multiple','h_multiple')}
+        ${checkboxRow('h_other','h_other')}
+        ${checkboxRow('h_none','h_none')}
+      </div>`;
+    case 4: return `
+      <h3 class="text-section-title" style="margin-bottom:6px;" data-i18n="warning_signs">${I18N.t('warning_signs')}</h3>
+      <p class="text-meta" style="margin-bottom:16px;" data-i18n="urgent_flag_note"></p>
+      <div class="checkbox-grid">
+        ${checkboxRow('w_bleeding','w_bleeding',true)}
+        ${checkboxRow('w_headache','w_headache',true)}
+        ${checkboxRow('w_vision','w_vision',true)}
+        ${checkboxRow('w_abdominal','w_abdominal',true)}
+        ${checkboxRow('w_fever','w_fever',true)}
+        ${checkboxRow('w_breathing','w_breathing',true)}
+        ${checkboxRow('w_convulsions','w_convulsions',true)}
+        ${checkboxRow('w_reduced','w_reduced_movement',true)}
+        ${checkboxRow('w_other','w_other',true)}
+      </div>`;
+    case 5: return `<div id="riskResultWrap"></div>`;
+    case 6: return `
+      <h3 class="text-section-title" style="margin-bottom:16px;" data-i18n="step_save">${I18N.t('step_save')}</h3>
+      <div id="saveSummary" class="text-meta" style="margin-bottom:16px;"></div>
+      <div id="saveStatus"></div>`;
+  }
+}
+
+function collectStep(step){
+  if(step===0){
+    state.beneficiary = {
+      name:val('b_name'), age:val('b_age'), mobile:val('b_mobile'), id:val('b_id'),
+      district:val('b_district'), block:val('b_block'), village:val('b_village'), area:val('b_area')
+    };
+  }
+  if(step===1){
+    state.pregnancy = {
+      lmp:val('p_lmp'), gravida:val('p_gravida'), para:val('p_para'),
+      prevCsection:checked('p_csection'), prevComplications:checked('p_complications')
+    };
+  }
+  if(step===2){
+    state.vitals = {
+      systolicBP:val('v_sbp'), diastolicBP:val('v_dbp'), pulse:val('v_pulse'), temperature:val('v_temp'),
+      weight:val('v_weight'), haemoglobin:val('v_hb'), bloodGlucose:val('v_glucose')
+    };
+    state.observations = { fetalMovement:val('o_fetal_movement'), fundalHeight:val('o_fundal_height'), fhr:val('o_fhr') };
+  }
+  if(step===3){
+    state.history = {
+      hypertension:checked('h_hypertension'), diabetes:checked('h_diabetes'), anaemia:checked('h_anaemia'),
+      prevCsection:checked('h_csection'), prevComplications:checked('h_complications'),
+      stillbirth:checked('h_stillbirth'), miscarriage:checked('h_miscarriage'), pph:checked('h_pph'),
+      multiplePregnancy:checked('h_multiple'), other:checked('h_other')
+    };
+  }
+  if(step===4){
+    state.warningSigns = {
+      bleeding:checked('w_bleeding'), headache:checked('w_headache'), vision:checked('w_vision'),
+      abdominal:checked('w_abdominal'), fever:checked('w_fever'), breathing:checked('w_breathing'),
+      convulsions:checked('w_convulsions'), reducedMovement:checked('w_reduced'), other:checked('w_other')
+    };
+  }
+}
+function val(id){ const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function checked(id){ const el = document.getElementById(id); return el ? el.checked : false; }
+
+function validateStep(step){
+  if(step===0 && (!val('b_name') || !val('b_age') || !val('b_district') || !val('b_block') || !val('b_village'))){
+    APP.toast(I18N.t('something_wrong'), 'error'); return false;
+  }
+  if(step===1 && !val('p_lmp')){ APP.toast(I18N.t('something_wrong'), 'error'); return false; }
+  return true;
+}
+
+function renderPanel(){
+  renderStepper();
+  document.getElementById('stepPanels').innerHTML = panelHTML(current);
+  I18N.apply();
+
+  // wire checkbox visual state
+  document.querySelectorAll('.checkbox-row input').forEach(cb=>{
+    cb.addEventListener('change', ()=> cb.closest('.checkbox-row').classList.toggle('checked', cb.checked));
+  });
+
+  if(current === 1){
+    const lmpInput = document.getElementById('p_lmp');
+    lmpInput.value = state.pregnancy.lmp || '';
+    document.getElementById('p_gravida').value = state.pregnancy.gravida || '';
+    document.getElementById('p_para').value = state.pregnancy.para || '';
+    const updateCalcs = ()=>{
+      const ga = APP.gestationalAgeWeeks(lmpInput.value);
+      document.getElementById('p_ga').value = ga ? `${ga.weeks} ${I18N.t('week_short')} ${ga.days}d` : '—';
+      document.getElementById('p_edd').value = APP.edd(lmpInput.value) ? APP.formatDate(APP.edd(lmpInput.value), I18N.current) : '—';
+      document.getElementById('p_trimester').value = ga ? APP.trimester(ga.weeks) : '—';
+    };
+    lmpInput.addEventListener('input', updateCalcs);
+    updateCalcs();
+  }
+
+  if(current === 5){
+    collectStep(4);
+    const result = RiskEngine.evaluate({
+      age: state.beneficiary.age,
+      vitals: state.vitals, history: state.history, warningSigns: state.warningSigns, pregnancy: state.pregnancy
+    });
+    state.riskResult = result;
+    const ga = APP.gestationalAgeWeeks(state.pregnancy.lmp);
+    document.getElementById('riskResultWrap').innerHTML = `
+      <div class="risk-result ${result.risk_level}">
+        <div class="risk-icon">${result.risk_level==='low'?ICONS.check:ICONS.alert}</div>
+        <div class="risk-level">${RiskEngine.levelLabel(result.risk_level).toUpperCase()}</div>
+        <p class="text-meta">${I18N.t('assessment_date')}: ${APP.formatDate(new Date().toISOString(), I18N.current)}</p>
+      </div>
+      ${result.urgent_flag ? `<div class="alert alert-danger" style="margin-top:16px;">${ICONS.alert}<span>${I18N.t('urgent_flag_note')}</span></div>` : ''}
+      <div class="card card-pad" style="margin-top:16px;">
+        <div class="text-section-title" style="font-size:15px;margin-bottom:10px;" data-i18n="contributing_indicators">${I18N.t('contributing_indicators')}</div>
+        ${result.contributing_indicators.length ? `<ul style="padding-left:18px;">${result.contributing_indicators.map(i=>`<li class="text-body" style="margin-bottom:4px;">${i}</li>`).join('')}</ul>`
+          : `<p class="text-meta">${I18N.t('none')}</p>`}
+        <div class="text-meta" style="margin-top:14px;"><strong data-i18n="recommended_action">${I18N.t('recommended_action')}:</strong> <span data-i18n="recommended_action_text">${I18N.t('recommended_action_text')}</span></div>
+        <div class="text-meta" style="margin-top:8px;" data-i18n="ruleset_version">${I18N.t('ruleset_version')}: ${result.ruleset_version}</div>
+      </div>
+      <div class="disclaimer-bar" style="margin-top:16px;">${ICONS.info}<span data-i18n="risk_engine_note">${I18N.t('risk_engine_note')}</span></div>
+    `;
+  }
+
+  if(current === 6){
+    document.getElementById('saveSummary').innerHTML =
+      `${state.beneficiary.name} · ${state.beneficiary.age} ${I18N.t('years_short')} · ${state.beneficiary.village}, ${state.beneficiary.block} · ${APP.riskBadge(state.riskResult.risk_level)}`;
+    I18N.apply();
+  }
+
+  document.getElementById('btnBack').style.visibility = current===0 ? 'hidden' : 'visible';
+  document.getElementById('btnNext').innerHTML = current===6
+    ? `<span data-i18n="save_assessment">${I18N.t('save_assessment')}</span>`
+    : `<span data-i18n="next">${I18N.t('next')}</span>`;
+  I18N.apply();
+}
+
+document.getElementById('btnBack').addEventListener('click', ()=>{
+  if(current>0){ current--; renderPanel(); window.scrollTo({top:0,behavior:'smooth'}); }
+});
+
+document.getElementById('btnNext').addEventListener('click', async ()=>{
+  if(current < 6){
+    collectStep(current);
+    if(!validateStep(current)) return;
+    current++;
+    renderPanel();
+    window.scrollTo({top:0,behavior:'smooth'});
+    return;
+  }
+  await saveRecord();
+});
+
+async function saveRecord(){
+  const btn = document.getElementById('btnNext');
+  btn.disabled = true;
+  document.getElementById('saveStatus').innerHTML = `<div class="alert alert-info">${ICONS.info}<span data-i18n="saving">${I18N.t('saving')}</span></div>`;
+
+  const record = {
+    beneficiary: state.beneficiary,
+    pregnancy: state.pregnancy,
+    vitals: state.vitals,
+    observations: state.observations,
+    history: state.history,
+    warning_signs: state.warningSigns,
+    risk_assessment: state.riskResult,
+    worker_id: session.id,
+    worker_name: session.name,
+    created_at: new Date().toISOString()
+  };
+
+  try{
+    let saved = false;
+    if(navigator.onLine){
+      const client = await getSupabaseClient();
+      if(client){
+        const { error } = await safeQuery(client.from('pregnancies').insert(record));
+        saved = !error;
+      }else{
+        saved = true; // DEMO mode — no backend configured, treat as saved locally
+      }
+    }
+    if(!saved){
+      await OfflineSync.enqueue('pregnancy', record);
+      document.getElementById('saveStatus').innerHTML = `<div class="alert alert-warning">${ICONS.followups}<span data-i18n="pending_sync_count">${I18N.t('pending_sync_count',{n:1})}</span></div>`;
+    }else{
+      document.getElementById('saveStatus').innerHTML = `<div class="alert alert-success">${ICONS.check}<span data-i18n="saved_successfully">${I18N.t('saved_successfully')}</span></div>`;
+    }
+    APP.toast(I18N.t('saved_successfully'), 'success');
+    setTimeout(()=>{ window.location.href = 'cases.html'; }, 1400);
+  }catch(e){
+    await OfflineSync.enqueue('pregnancy', record);
+    document.getElementById('saveStatus').innerHTML = `<div class="alert alert-warning">${ICONS.followups}<span>${I18N.t('pending_sync_count',{n:1})}</span></div>`;
+    btn.disabled = false;
+  }
+}
+
+renderPanel();
+}
+</script>
+</body>
+</html>

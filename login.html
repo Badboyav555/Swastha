@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Login | SwasthyaSaathi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="auth-shell">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="brand-mark" style="width:52px;height:52px;font-size:19px;">SS</div>
+      <div>
+        <div class="brand-name-hi" style="font-size:19px;" data-i18n="brand_hi">स्वास्थ्यसाथी</div>
+        <div class="brand-name-en" data-i18n="brand_en">SwasthyaSaathi</div>
+      </div>
+      <div class="lang-switch" style="margin-top:10px;"><button data-lang="en">EN</button><button data-lang="hi">हिन्दी</button></div>
+    </div>
+
+    <h1 class="text-section-title" style="text-align:center;margin-bottom:2px;" data-i18n="login_title">Welcome back</h1>
+    <p class="text-meta" style="text-align:center;margin-bottom:24px;" data-i18n="login_sub">Login to continue your fieldwork</p>
+
+    <div id="loginAlert" class="alert alert-danger hidden" style="margin-bottom:16px;"></div>
+
+    <form id="loginForm" novalidate>
+      <div class="field" id="mobileField">
+        <label for="mobile" data-i18n="mobile_number">Mobile Number</label>
+        <input type="tel" id="mobile" name="mobile" inputmode="numeric" maxlength="10" placeholder="98XXXXXXXX" required>
+        <div class="error-text" data-i18n="something_wrong">Please enter a valid mobile number.</div>
+      </div>
+      <div class="field" id="passwordField">
+        <label for="password" data-i18n="password">Password</label>
+        <input type="password" id="password" name="password" required minlength="8">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-block" id="loginSubmit">
+        <span data-i18n="btn_login">Login</span>
+      </button>
+    </form>
+
+    <p class="text-meta" style="text-align:center;margin-top:16px;" data-i18n="forgot_password">Need help accessing your account? Contact your block coordinator for account assistance.</p>
+
+    <div style="border-top:1px solid var(--color-border);margin-top:20px;padding-top:16px;text-align:center;">
+      <span class="text-meta" data-i18n="no_account">New ASHA worker?</span>
+      <a href="signup.html" style="color:var(--color-primary-dark);font-weight:600;font-size:14px;margin-left:4px;" data-i18n="signup_link">Register here</a>
+    </div>
+
+    <p class="text-meta" style="text-align:center;margin-top:18px;font-size:11px;">
+      Demo accounts — ASHA: 9811100002 · ANM: 9811100003 · Medical Officer: 9811100004 · Block Officer: 9811100005 · District Officer: 9811100006 · Admin: 9811100001 (any password works when Supabase is not yet configured)
+    </p>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="js/translations.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script>
+  // Redirect if already logged in
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const existing = AUTH.getSession();
+    if(existing) window.location.href = AUTH.roleHome(existing.role);
+  });
+
+  const form = document.getElementById('loginForm');
+  const alertBox = document.getElementById('loginAlert');
+  const submitBtn = document.getElementById('loginSubmit');
+
+  function showAlert(msg){
+    alertBox.textContent = msg;
+    alertBox.classList.remove('hidden');
+  }
+
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    alertBox.classList.add('hidden');
+    const mobile = document.getElementById('mobile').value.trim();
+    const password = document.getElementById('password').value;
+
+    document.getElementById('mobileField').classList.remove('has-error');
+    if(!AUTH.validateMobile(mobile)){
+      document.getElementById('mobileField').classList.add('has-error');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = I18N.t('loading');
+
+    // DEMO CONVENIENCE: when Supabase is not yet configured, any password
+    // of 8+ chars logs into a matching demo mobile number so judges/reviewers
+    // can explore every role without needing a live backend.
+    let result;
+    if(!SUPABASE_CONFIGURED){
+      const demoUser = window.DEMO_DATA.users.find(u=>u.mobile===mobile);
+      if(demoUser && password.length >= 8){
+        result = demoUser.status === 'pending'
+          ? { ok:false, error: I18N.current==='hi' ? 'आपका खाता समीक्षा हेतु लंबित है' : 'Your account is pending admin approval' }
+          : { ok:true, user:demoUser };
+      }else{
+        result = { ok:false, error: I18N.current==='hi' ? 'गलत मोबाइल नंबर या पासवर्ड (डेमो)' : 'Incorrect mobile number or password (demo)' };
+      }
+    }else{
+      result = await AUTH.login(mobile, password);
+    }
+
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = `<span data-i18n="btn_login">${I18N.t('btn_login')}</span>`;
+
+    if(!result.ok){
+      showAlert(result.error);
+      return;
+    }
+    AUTH.setSession(result.user, true);
+    window.location.href = AUTH.roleHome(result.user.role);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Admin | SwasthyaSaathi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app-shell" id="appShellRoot">
+  <main class="main-content">
+    <div id="pageContent">
+      <div class="page-header">
+        <h1 class="text-page-title" data-i18n="admin_title">Admin</h1>
+      </div>
+      <div class="page-body">
+        <div class="tabs" id="tabsBar">
+          <button class="tab-btn" data-tab="dashboard" data-i18n="admin_dashboard">Dashboard</button>
+          <button class="tab-btn" data-tab="users" data-i18n="admin_users">Users</button>
+          <button class="tab-btn" data-tab="approvals" data-i18n="admin_pending_approvals">Pending Approvals</button>
+          <button class="tab-btn" data-tab="officers" data-i18n="admin_officers">Officers</button>
+          <button class="tab-btn" data-tab="facilities" data-i18n="admin_facilities">Facilities</button>
+          <button class="tab-btn" data-tab="rules" data-i18n="admin_risk_rules">Risk Rules</button>
+          <button class="tab-btn" data-tab="regions" data-i18n="admin_districts_blocks">Districts &amp; Blocks</button>
+          <button class="tab-btn" data-tab="audit" data-i18n="admin_audit_logs">Audit Logs</button>
+          <button class="tab-btn" data-tab="settings" data-i18n="admin_settings">Settings</button>
+        </div>
+
+        <div class="tab-panel" id="panel-dashboard">
+          <div class="kpi-grid" id="adminKpis" style="margin-bottom:24px;"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-users">
+          <div id="usersTableWrap"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-approvals">
+          <div id="approvalsWrap"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-officers">
+          <div class="flex justify-between items-center" style="margin-bottom:14px;">
+            <div class="text-section-title" data-i18n="admin_officers">Officers</div>
+            <button class="btn btn-primary btn-sm" data-i18n="add_officer">Add Officer</button>
+          </div>
+          <div id="officersTableWrap"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-facilities">
+          <div id="adminFacilitiesWrap"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-rules">
+          <div class="flex justify-between items-center" style="margin-bottom:14px;">
+            <div class="text-section-title" data-i18n="admin_risk_rules">Risk Rules</div>
+            <button class="btn btn-primary btn-sm" data-i18n="add_rule">Add Rule</button>
+          </div>
+          <div id="rulesTableWrap"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-regions">
+          <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="card card-pad">
+              <div class="text-section-title" style="margin-bottom:10px;" data-i18n="district">District</div>
+              <div id="districtList"></div>
+            </div>
+            <div class="card card-pad">
+              <div class="text-section-title" style="margin-bottom:10px;" data-i18n="block">Block</div>
+              <div id="blockList"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="panel-audit">
+          <div id="auditTableWrap"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-settings">
+          <div class="card card-pad">
+            <div class="text-section-title" style="margin-bottom:14px;" data-i18n="admin_settings">Settings</div>
+            <div class="field">
+              <label data-i18n="ruleset_version">Ruleset Version</label>
+              <input type="text" value="v1.0.0" disabled>
+            </div>
+            <div class="disclaimer-bar" style="margin-top:8px;"><span data-i18n="risk_engine_note"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/translations.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/risk-engine.js"></script>
+<script src="js/offline.js"></script>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script>
+const session = APP.mountShell('admin', ['admin']);
+if(session){
+
+document.querySelector('#panel-settings .disclaimer-bar').innerHTML = `${ICONS.info}<span data-i18n="risk_engine_note">${I18N.t('risk_engine_note')}</span>`;
+
+const TABS = ['dashboard','users','approvals','officers','facilities','rules','regions','audit','settings'];
+function activateTab(tab){
+  document.querySelectorAll('#tabsBar .tab-btn').forEach(b=> b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('.tab-panel').forEach(p=> p.classList.toggle('active', p.id === 'panel-'+tab));
+  window.location.hash = tab;
+}
+document.querySelectorAll('#tabsBar .tab-btn').forEach(b=> b.addEventListener('click', ()=> activateTab(b.dataset.tab)));
+const hashTab = window.location.hash.replace('#','');
+activateTab(TABS.includes(hashTab) ? hashTab : 'dashboard');
+
+const users = window.DEMO_DATA.users;
+
+function renderAdminDashboard(){
+  const pending = users.filter(u=>u.status==='pending').length;
+  document.getElementById('adminKpis').innerHTML = `
+    <div class="kpi-card"><div class="kpi-label" data-i18n="kpi_total_users">${I18N.t('kpi_total_users')}</div><div class="kpi-value">${users.length}</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="admin_pending_approvals">${I18N.t('admin_pending_approvals')}</div><div class="kpi-value warning">${pending}</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="kpi_total_pregnancies">${I18N.t('kpi_total_pregnancies')}</div><div class="kpi-value">${window.DEMO_DATA.cases.length}</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="kpi_high_risk">${I18N.t('kpi_high_risk')}</div><div class="kpi-value danger">${window.DEMO_DATA.cases.filter(c=>c.risk==='high').length}</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="kpi_pending_referrals">${I18N.t('kpi_pending_referrals')}</div><div class="kpi-value warning">2</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="kpi_overdue_followups">${I18N.t('kpi_overdue_followups')}</div><div class="kpi-value danger">1</div></div>
+  `;
+}
+
+function statusBadge(u){
+  if(u.status==='pending') return `<span class="badge badge-moderate">${I18N.t('status_pending')}</span>`;
+  return u.is_active ? `<span class="badge badge-low">${I18N.current==='hi'?'सक्रिय':'Active'}</span>` : `<span class="badge badge-high">${I18N.current==='hi'?'निष्क्रिय':'Inactive'}</span>`;
+}
+
+function renderUsers(){
+  document.getElementById('usersTableWrap').innerHTML = `<div class="table-container"><table class="data-table">
+    <thead><tr>
+      <th data-i18n="name">${I18N.t('name')}</th><th data-i18n="col_mobile">${I18N.t('col_mobile')}</th>
+      <th data-i18n="col_role">${I18N.t('col_role')}</th><th data-i18n="col_district">${I18N.t('col_district')}</th>
+      <th data-i18n="col_block">${I18N.t('col_block')}</th><th data-i18n="col_status">${I18N.t('col_status')}</th>
+      <th data-i18n="col_action">${I18N.t('col_action')}</th>
+    </tr></thead>
+    <tbody>${users.map(u=>`<tr>
+      <td style="font-weight:600;">${u.name}</td><td>${u.mobile}</td>
+      <td><span class="badge badge-info">${I18N.t('role_'+u.role)}</span></td>
+      <td>${u.district}</td><td>${u.block}</td><td>${statusBadge(u)}</td>
+      <td class="flex gap-2">
+        <button class="btn btn-ghost btn-sm" data-i18n="act_view">${I18N.t('act_view')}</button>
+        <button class="btn btn-ghost btn-sm" data-i18n="${u.is_active?'act_deactivate':'act_activate'}">${I18N.t(u.is_active?'act_deactivate':'act_activate')}</button>
+      </td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderApprovals(){
+  const pending = users.filter(u=>u.status==='pending');
+  const wrap = document.getElementById('approvalsWrap');
+  if(!pending.length){ wrap.innerHTML = `<div class="empty-state">${ICONS.empty}<div class="title" data-i18n="no_records_found">${I18N.t('no_records_found')}</div></div>`; return; }
+  wrap.innerHTML = pending.map(u=>`
+    <div class="card card-pad flex items-center justify-between" style="margin-bottom:12px;flex-wrap:wrap;gap:12px;">
+      <div>
+        <div style="font-weight:700;">${u.name}</div>
+        <div class="text-meta">${u.mobile} · ${u.village}, ${u.block}, ${u.district}</div>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn btn-primary btn-sm approve-btn" data-id="${u.id}" data-i18n="act_approve">${I18N.t('act_approve')}</button>
+        <button class="btn btn-secondary btn-sm reject-btn" data-id="${u.id}" data-i18n="act_reject">${I18N.t('act_reject')}</button>
+      </div>
+    </div>`).join('');
+  wrap.querySelectorAll('.approve-btn').forEach(b=> b.addEventListener('click', ()=> updateApproval(b.dataset.id, true)));
+  wrap.querySelectorAll('.reject-btn').forEach(b=> b.addEventListener('click', ()=> updateApproval(b.dataset.id, false)));
+}
+
+async function updateApproval(id, approve){
+  const u = users.find(x=>x.id===id);
+  if(!u) return;
+  const client = await getSupabaseClient();
+  if(client){
+    await safeQuery(client.from('users').update({ status: approve?'approved':'rejected', is_active: approve }).eq('id', id));
+    await safeQuery(client.from('audit_logs').insert({ user_id: session.id, action: approve?'Approved user':'Rejected user', entity:'users', entity_id:id, created_at:new Date().toISOString() }));
+  }
+  u.status = approve ? 'approved' : 'rejected';
+  u.is_active = approve;
+  window.DEMO_DATA.auditLogs.unshift({ user: session.name, action: approve?'Approved user':'Rejected user', entity:'users', entityId:id, date: new Date().toISOString().slice(0,10), time: new Date().toTimeString().slice(0,5) });
+  APP.toast(I18N.t('saved_successfully'), 'success');
+  renderApprovals(); renderUsers(); renderAdminDashboard(); renderAudit();
+}
+
+function renderOfficers(){
+  const officers = users.filter(u=>['anm','medical_officer','block_officer','district_officer'].includes(u.role));
+  document.getElementById('officersTableWrap').innerHTML = `<div class="table-container"><table class="data-table">
+    <thead><tr><th data-i18n="name">${I18N.t('name')}</th><th data-i18n="col_role">${I18N.t('col_role')}</th>
+    <th data-i18n="col_district">${I18N.t('col_district')}</th><th data-i18n="assigned_area">${I18N.t('assigned_area')}</th>
+    <th data-i18n="col_status">${I18N.t('col_status')}</th></tr></thead>
+    <tbody>${officers.map(o=>`<tr><td style="font-weight:600;">${o.name}</td><td><span class="badge badge-info">${I18N.t('role_'+o.role)}</span></td>
+      <td>${o.district}</td><td>${o.block}</td><td>${statusBadge(o)}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderAdminFacilities(){
+  document.getElementById('adminFacilitiesWrap').innerHTML = `<div class="table-container"><table class="data-table">
+    <thead><tr><th data-i18n="facility_name">${I18N.t('facility_name')}</th><th data-i18n="facility_type">${I18N.t('facility_type')}</th>
+    <th data-i18n="col_district">${I18N.t('col_district')}</th><th data-i18n="col_block">${I18N.t('col_block')}</th>
+    <th data-i18n="obstetric_capability">${I18N.t('obstetric_capability')}</th><th data-i18n="emergency_capability">${I18N.t('emergency_capability')}</th>
+    <th data-i18n="col_action">${I18N.t('col_action')}</th></tr></thead>
+    <tbody>${window.DEMO_DATA.facilities.map(f=>`<tr><td style="font-weight:600;">${f.name}</td><td>${f.type}</td><td>${f.district}</td><td>${f.block}</td>
+      <td>${f.obstetric?ICONS.check.replace('width="24" height="24"','width="15" height="15"'):'—'}</td>
+      <td>${f.emergency?ICONS.check.replace('width="24" height="24"','width="15" height="15"'):'—'}</td>
+      <td><button class="btn btn-ghost btn-sm" data-i18n="act_edit">${I18N.t('act_edit')}</button></td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderRules(){
+  document.getElementById('rulesTableWrap').innerHTML = `<div class="table-container"><table class="data-table">
+    <thead><tr><th data-i18n="rule_name">${I18N.t('rule_name')}</th><th data-i18n="indicator">${I18N.t('indicator')}</th>
+    <th data-i18n="condition">${I18N.t('condition')}</th><th data-i18n="severity">${I18N.t('severity')}</th>
+    <th data-i18n="ruleset_version">${I18N.t('ruleset_version')}</th><th data-i18n="enabled">${I18N.t('enabled')}</th></tr></thead>
+    <tbody>${window.DEMO_DATA.riskRules.map(r=>`<tr><td style="font-weight:600;">${r.name}</td><td>${r.indicator}</td><td>${r.condition}</td>
+      <td><span class="badge ${r.severity==='high'||r.severity==='urgent'?'badge-high':'badge-moderate'}">${r.severity}</span></td>
+      <td class="text-meta">${r.version}</td>
+      <td><label class="checkbox-row ${r.enabled?'checked':''}" style="display:inline-flex;width:auto;padding:6px 10px;"><input type="checkbox" ${r.enabled?'checked':''} disabled></label></td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderRegions(){
+  const districts = [...new Set(users.map(u=>u.district).filter(d=>d!=='—'))];
+  const blocks = [...new Set(users.map(u=>u.block).filter(b=>b!=='—'))];
+  document.getElementById('districtList').innerHTML = districts.map(d=>`<div class="text-body" style="padding:8px 0;border-bottom:1px solid var(--color-border);">${d}</div>`).join('');
+  document.getElementById('blockList').innerHTML = blocks.map(b=>`<div class="text-body" style="padding:8px 0;border-bottom:1px solid var(--color-border);">${b}</div>`).join('');
+}
+
+function renderAudit(){
+  document.getElementById('auditTableWrap').innerHTML = `<div class="table-container"><table class="data-table">
+    <thead><tr><th data-i18n="col_user">${I18N.t('col_user')}</th><th data-i18n="col_action_log">${I18N.t('col_action_log')}</th>
+    <th data-i18n="col_entity">${I18N.t('col_entity')}</th><th data-i18n="col_entity_id">${I18N.t('col_entity_id')}</th>
+    <th data-i18n="col_date">${I18N.t('col_date')}</th><th data-i18n="col_time">${I18N.t('col_time')}</th></tr></thead>
+    <tbody>${window.DEMO_DATA.auditLogs.map(a=>`<tr><td style="font-weight:600;">${a.user}</td><td>${a.action}</td><td class="text-meta">${a.entity}</td>
+      <td class="text-meta">${a.entityId}</td><td class="text-meta">${APP.formatDate(a.date, I18N.current)}</td><td class="text-meta">${a.time}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderAll(){
+  renderAdminDashboard(); renderUsers(); renderApprovals(); renderOfficers();
+  renderAdminFacilities(); renderRules(); renderRegions(); renderAudit();
+  I18N.apply();
+}
+document.addEventListener('langchange', renderAll);
+renderAll();
+}
+</script>
+</body>
+</html>

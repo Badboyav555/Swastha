@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Cases | SwasthyaSaathi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app-shell" id="appShellRoot">
+  <main class="main-content">
+    <div id="pageContent">
+      <div class="page-header">
+        <h1 class="text-page-title" data-i18n="cases_title">Cases</h1>
+      </div>
+
+      <div class="page-body">
+        <div class="card card-pad" style="margin-bottom:20px;">
+          <div class="form-grid cols-2" style="gap:12px;">
+            <div class="field" style="margin-bottom:0;grid-column:1/-1;">
+              <div class="input-unit" style="position:relative;">
+                <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--color-text-secondary);" id="searchIcon"></span>
+                <input type="text" id="searchInput" data-i18n-ph="search_placeholder" style="padding-left:40px;">
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <select id="filterRisk">
+                <option value="" data-i18n="filter_risk">Risk</option>
+                <option value="low" data-i18n="risk_low">Low</option>
+                <option value="moderate" data-i18n="risk_moderate">Moderate</option>
+                <option value="high" data-i18n="risk_high">High</option>
+              </select>
+            </div>
+            <div class="field" style="margin-bottom:0;">
+              <select id="filterBlock">
+                <option value="" data-i18n="filter_block">Block</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div id="resultsCount" class="text-meta" style="margin-bottom:12px;"></div>
+        <div id="casesTableWrap"></div>
+        <div id="casesCardWrap" class="case-card-list mobile-only"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="caseOverlay">
+  <div class="drawer">
+    <div class="drawer-header">
+      <div class="text-section-title" data-i18n="case_details">Case Details</div>
+      <button class="icon-btn" id="closeDrawer">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </div>
+</div>
+
+<script src="js/translations.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/risk-engine.js"></script>
+<script src="js/offline.js"></script>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script>
+const session = APP.mountShell('cases');
+if(session){
+
+document.getElementById('searchIcon').innerHTML = ICONS.search.replace('width="24" height="24"','width="17" height="17"');
+
+let allCases = window.DEMO_DATA.cases;
+const blocks = [...new Set(allCases.map(c=>c.block))];
+document.getElementById('filterBlock').insertAdjacentHTML('beforeend', blocks.map(b=>`<option value="${b}">${b}</option>`).join(''));
+
+// Support ?risk=high deep-link from dashboard quick actions
+const params = new URLSearchParams(window.location.search);
+if(params.get('risk')) document.getElementById('filterRisk').value = params.get('risk');
+
+function filtered(){
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const risk = document.getElementById('filterRisk').value;
+  const block = document.getElementById('filterBlock').value;
+  return allCases.filter(c=>{
+    if(q && !(c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q) || c.mobile.includes(q))) return false;
+    if(risk && c.risk !== risk) return false;
+    if(block && c.block !== block) return false;
+    return true;
+  });
+}
+
+function renderTable(list){
+  const wrap = document.getElementById('casesTableWrap');
+  wrap.classList.add('desktop-only');
+  if(!list.length){
+    wrap.innerHTML = `<div class="empty-state">${ICONS.empty}<div class="title" data-i18n="no_records_found">${I18N.t('no_records_found')}</div></div>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="table-container">
+    <table class="data-table">
+      <thead><tr>
+        <th data-i18n="col_case_id">${I18N.t('col_case_id')}</th>
+        <th data-i18n="col_beneficiary">${I18N.t('col_beneficiary')}</th>
+        <th data-i18n="col_week">${I18N.t('col_week')}</th>
+        <th data-i18n="col_risk">${I18N.t('col_risk')}</th>
+        <th data-i18n="col_referral">${I18N.t('col_referral')}</th>
+        <th data-i18n="col_followup">${I18N.t('col_followup')}</th>
+        <th data-i18n="col_action">${I18N.t('col_action')}</th>
+      </tr></thead>
+      <tbody>
+        ${list.map(c=>`<tr class="row-link" data-id="${c.id}">
+          <td style="font-weight:600;">${c.id}</td>
+          <td>${c.name}</td>
+          <td>${c.week} ${I18N.t('week_short')}</td>
+          <td>${APP.riskBadge(c.risk)}</td>
+          <td><span class="badge badge-neutral">${c.referral==='—'?'—':I18N.t('status_'+c.referral)}</span></td>
+          <td class="text-meta">${APP.formatDate(c.followup, I18N.current)}</td>
+          <td><button class="btn btn-ghost btn-sm view-btn" data-id="${c.id}" data-i18n="view_details">${I18N.t('view_details')}</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderCards(list){
+  const wrap = document.getElementById('casesCardWrap');
+  if(!list.length){
+    wrap.innerHTML = `<div class="empty-state">${ICONS.empty}<div class="title" data-i18n="no_records_found">${I18N.t('no_records_found')}</div></div>`;
+    return;
+  }
+  wrap.innerHTML = list.map(c=>`
+    <div class="case-row-card" data-id="${c.id}">
+      <div class="top">
+        <div><div class="name">${c.name}</div><div class="text-meta">${c.id}</div></div>
+        ${APP.riskBadge(c.risk)}
+      </div>
+      <div class="meta-row">
+        <span>${c.week} ${I18N.t('week_short')}</span>
+        <span>${c.block}</span>
+        <span>${I18N.t('col_followup')}: ${APP.formatDate(c.followup, I18N.current)}</span>
+      </div>
+    </div>`).join('');
+}
+
+function render(){
+  const list = filtered();
+  document.getElementById('resultsCount').textContent = `${list.length} ${I18N.current==='hi'?'केस मिले':'cases found'}`;
+  renderTable(list);
+  renderCards(list);
+  wireRowClicks();
+  I18N.apply();
+}
+
+function wireRowClicks(){
+  document.querySelectorAll('.row-link, .case-row-card, .view-btn').forEach(el=>{
+    el.addEventListener('click', (e)=>{
+      const id = el.dataset.id || el.closest('[data-id]')?.dataset.id;
+      if(id) openDrawer(id);
+    });
+  });
+}
+
+function openDrawer(id){
+  const c = allCases.find(x=>x.id===id);
+  if(!c) return;
+  document.getElementById('drawerBody').innerHTML = `
+    <div class="flex items-center justify-between" style="margin-bottom:16px;">
+      <div>
+        <div class="text-section-title">${c.name}</div>
+        <div class="text-meta">${c.id} · ${c.age} ${I18N.t('years_short')} · ${c.mobile}</div>
+      </div>
+      ${APP.riskBadge(c.risk)}
+    </div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
+      <div class="card card-pad"><div class="kpi-label">${I18N.t('col_week')}</div><div style="font-weight:700;">${c.week} ${I18N.t('week_short')}</div></div>
+      <div class="card card-pad"><div class="kpi-label">${I18N.t('col_block')}</div><div style="font-weight:700;">${c.block}</div></div>
+    </div>
+    <h4 class="text-section-title" style="font-size:14.5px;margin-bottom:10px;" data-i18n="assessment_history">${I18N.t('assessment_history')}</h4>
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-dot done">${ICONS.check.replace('width="24" height="24"','width="13" height="13"')}</div>
+        <div><div class="timeline-title">${I18N.t('risk_low')==='Low Risk'?'Initial screening':'प्रारंभिक स्क्रीनिंग'}</div><div class="timeline-meta">${APP.formatDate(c.followup)}</div></div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-dot">${ICONS.followups.replace('width="24" height="24"','width="13" height="13"')}</div>
+        <div><div class="timeline-title" data-i18n="medical_review">${I18N.t('medical_review')}</div><div class="timeline-meta text-meta">${c.referral==='—'?I18N.t('status_pending'):I18N.t('status_'+c.referral)}</div></div>
+      </div>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap;">
+      <a href="referrals.html" class="btn btn-primary btn-sm" data-i18n="new_referral">${I18N.t('new_referral')}</a>
+      <a href="pregnancy.html" class="btn btn-secondary btn-sm" data-i18n="save_assessment">${I18N.t('save_assessment')}</a>
+    </div>
+  `;
+  I18N.apply(document.getElementById('drawerBody'));
+  document.getElementById('caseOverlay').classList.add('open');
+}
+
+document.getElementById('closeDrawer').addEventListener('click', ()=> document.getElementById('caseOverlay').classList.remove('open'));
+document.getElementById('caseOverlay').addEventListener('click', (e)=>{ if(e.target.id==='caseOverlay') e.currentTarget.classList.remove('open'); });
+
+['searchInput','filterRisk','filterBlock'].forEach(id=> document.getElementById(id).addEventListener('input', render));
+document.addEventListener('langchange', render);
+render();
+
+if(params.get('case')) openDrawer(params.get('case'));
+}
+</script>
+</body>
+</html>

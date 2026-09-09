@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Referrals | SwasthyaSaathi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app-shell" id="appShellRoot">
+  <main class="main-content">
+    <div id="pageContent">
+      <div class="page-header">
+        <h1 class="text-page-title" data-i18n="nav_referrals">Referrals</h1>
+      </div>
+      <div class="page-body">
+        <div class="tabs" id="tabsBar">
+          <button class="tab-btn" data-tab="referral" data-i18n="tab_referral_mgmt">Referral Management</button>
+          <button class="tab-btn" data-tab="facilities" data-i18n="tab_facilities">Facilities</button>
+          <button class="tab-btn" data-tab="followups" data-i18n="tab_followups">Follow-ups</button>
+          <button class="tab-btn" data-tab="anc" data-i18n="tab_anc">ANC</button>
+          <button class="tab-btn" data-tab="postnatal" data-i18n="tab_postnatal">Postnatal</button>
+          <button class="tab-btn" data-tab="child" data-i18n="tab_child_health">Child Health</button>
+          <button class="tab-btn" data-tab="immunization" data-i18n="tab_immunization">Immunization</button>
+        </div>
+
+        <div class="tab-panel" id="panel-referral">
+          <div class="flex items-center justify-between" style="margin-bottom:14px;flex-wrap:wrap;gap:10px;">
+            <div class="text-section-title" data-i18n="tab_referral_mgmt">Referral Management</div>
+            <button class="btn btn-primary btn-sm" id="newReferralBtn"><span data-i18n="new_referral">New Referral</span></button>
+          </div>
+          <div class="card card-pad" style="margin-bottom:20px;">
+            <div class="text-meta" style="margin-bottom:12px;font-weight:600;">Referral timeline — example</div>
+            <div class="workflow-track" id="referralWorkflow"></div>
+          </div>
+          <div id="referralTableWrap"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-facilities">
+          <div class="text-section-title" style="margin-bottom:14px;" data-i18n="tab_facilities">Facilities</div>
+          <div id="facilitiesGrid" class="grid" style="grid-template-columns:1fr;"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-followups">
+          <div class="text-section-title" style="margin-bottom:14px;" data-i18n="tab_followups">Follow-ups</div>
+          <div class="tabs" id="followupSubTabs" style="border-bottom:none;margin-bottom:14px;gap:8px;"></div>
+          <div id="followupList" class="case-card-list"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-anc">
+          <div class="flex items-center justify-between" style="margin-bottom:14px;">
+            <div class="text-section-title" data-i18n="tab_anc">ANC</div>
+            <button class="btn btn-primary btn-sm" data-i18n="add_anc_visit">Add ANC Visit</button>
+          </div>
+          <div class="timeline" id="ancTimeline"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-postnatal">
+          <div class="text-section-title" style="margin-bottom:14px;" data-i18n="tab_postnatal">Postnatal</div>
+          <div class="card card-pad" id="postnatalCard"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-child">
+          <div class="text-section-title" style="margin-bottom:14px;" data-i18n="tab_child_health">Child Health</div>
+          <div id="childGrid" class="grid" style="grid-template-columns:1fr;"></div>
+        </div>
+
+        <div class="tab-panel" id="panel-immunization">
+          <div class="text-section-title" style="margin-bottom:14px;" data-i18n="tab_immunization">Immunization</div>
+          <div class="kpi-grid" id="immKpis" style="margin-bottom:20px;"></div>
+          <div id="immTableWrap"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/translations.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/risk-engine.js"></script>
+<script src="js/offline.js"></script>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script>
+const session = APP.mountShell('referrals');
+if(session){
+
+// New Referral button icon (inserted post-load since template literal ran before ICONS existed)
+document.getElementById('newReferralBtn').innerHTML = `${ICONS.plus.replace('width="24" height="24"','width="15" height="15"')} <span data-i18n="new_referral">${I18N.t('new_referral')}</span>`;
+
+const TABS = ['referral','facilities','followups','anc','postnatal','child','immunization'];
+
+function activateTab(tab){
+  document.querySelectorAll('#tabsBar .tab-btn').forEach(b=> b.classList.toggle('active', b.dataset.tab===tab));
+  document.querySelectorAll('.tab-panel').forEach(p=> p.classList.toggle('active', p.id === 'panel-'+tab));
+  window.location.hash = tab;
+}
+document.querySelectorAll('#tabsBar .tab-btn').forEach(b=> b.addEventListener('click', ()=> activateTab(b.dataset.tab)));
+
+const hashTab = window.location.hash.replace('#','');
+activateTab(TABS.includes(hashTab) ? hashTab : 'referral');
+
+/* ---------------- Referral Management ---------------- */
+const REFERRAL_DEMO = [
+  { id:'REF-501', beneficiary:'Geeta Kumari', caseId:'CASE-1042', risk:'high', reason:'Severely elevated blood pressure', priority:'Urgent', destination:'Sanganer PHC', status:'referred', date:'2026-09-08' },
+  { id:'REF-500', beneficiary:'Radha Bai', caseId:'CASE-1040', risk:'moderate', reason:'Elevated BP, low haemoglobin', priority:'Routine', destination:'Chaksu CHC', status:'pending', date:'2026-09-07' },
+  { id:'REF-499', beneficiary:'Kiran Meena', caseId:'CASE-1038', risk:'high', reason:'History of postpartum haemorrhage', priority:'Urgent', destination:'Jaipur District Hospital', status:'completed', date:'2026-09-01' },
+];
+
+function renderReferralWorkflow(){
+  const steps = [
+    {icon:'cases', label:'rt_assessment'}, {icon:'reports', label:'rt_generated'},
+    {icon:'referrals', label:'rt_referred'}, {icon:'building', label:'rt_facility_received'},
+    {icon:'shield', label:'rt_medical_review'}, {icon:'followups', label:'rt_followup'},
+    {icon:'check', label:'rt_completed'}
+  ];
+  document.getElementById('referralWorkflow').innerHTML = steps.map((s,i)=>`
+    <div class="workflow-step"><div class="workflow-icon" style="width:40px;height:40px;">${ICONS[s.icon]}</div>
+    <div class="workflow-label" style="font-size:11px;" data-i18n="${s.label}">${I18N.t(s.label)}</div></div>
+    ${i<steps.length-1?`<div class="workflow-arrow" style="padding:0 2px;">${ICONS.chevronRight.replace('width="24" height="24"','width="14" height="14"')}</div>`:''}
+  `).join('');
+}
+
+function renderReferralTable(){
+  const wrap = document.getElementById('referralTableWrap');
+  wrap.innerHTML = `<div class="table-container"><table class="data-table">
+    <thead><tr>
+      <th data-i18n="col_case_id">${I18N.t('col_case_id')}</th>
+      <th data-i18n="col_beneficiary">${I18N.t('col_beneficiary')}</th>
+      <th data-i18n="referral_reason">${I18N.t('referral_reason')}</th>
+      <th data-i18n="referral_priority">${I18N.t('referral_priority')}</th>
+      <th data-i18n="referral_destination">${I18N.t('referral_destination')}</th>
+      <th data-i18n="referral_status">${I18N.t('referral_status')}</th>
+      <th data-i18n="col_date">${I18N.t('col_date')}</th>
+    </tr></thead>
+    <tbody>${REFERRAL_DEMO.map(r=>`<tr>
+      <td style="font-weight:600;">${r.caseId}</td>
+      <td>${r.beneficiary}</td>
+      <td class="text-meta">${r.reason}</td>
+      <td>${r.priority}</td>
+      <td>${r.destination}</td>
+      <td><span class="badge ${r.status==='completed'?'badge-low':r.status==='pending'?'badge-moderate':'badge-info'}">${I18N.t('status_'+r.status)}</span></td>
+      <td class="text-meta">${APP.formatDate(r.date, I18N.current)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+/* ---------------- Facilities ---------------- */
+function renderFacilities(){
+  const grid = document.getElementById('facilitiesGrid');
+  grid.innerHTML = window.DEMO_DATA.facilities.map(f=>`
+    <div class="card card-pad flex items-center justify-between" style="flex-wrap:wrap;gap:12px;">
+      <div class="flex items-center gap-3">
+        <div class="workflow-icon" style="width:44px;height:44px;">${ICONS.building}</div>
+        <div>
+          <div style="font-weight:700;">${f.name}</div>
+          <div class="text-meta">${f.type} · ${f.block!=='—'?f.block+', ':''}${f.district}</div>
+        </div>
+      </div>
+      <div class="flex gap-2" style="flex-wrap:wrap;">
+        ${f.obstetric ? `<span class="badge badge-info">${I18N.t('obstetric_capability')}</span>`:''}
+        ${f.emergency ? `<span class="badge badge-high">${I18N.t('emergency_capability')}</span>`:''}
+        <span class="text-meta">${f.contact}</span>
+      </div>
+    </div>`).join('');
+}
+
+/* ---------------- Follow-ups ---------------- */
+const FOLLOWUP_DEMO = [
+  { beneficiary:'Radha Bai', date:'2026-09-09', reason:'BP recheck', worker:'Sunita Devi', status:'due', category:'today' },
+  { beneficiary:'Geeta Kumari', date:'2026-09-10', reason:'Post-referral review', worker:'Kavita Yadav', status:'due', category:'upcoming' },
+  { beneficiary:'Kiran Meena', date:'2026-09-05', reason:'Haemoglobin recheck', worker:'Sunita Devi', status:'missed', category:'overdue' },
+  { beneficiary:'Pooja Sharma', date:'2026-09-01', reason:'Routine ANC', worker:'Kavita Yadav', status:'completed', category:'completed' },
+];
+let currentFollowupCat = 'today';
+function renderFollowupSubTabs(){
+  const cats = [ ['today','followup_today'], ['upcoming','followup_upcoming'], ['overdue','followup_overdue'], ['completed','followup_completed'] ];
+  document.getElementById('followupSubTabs').innerHTML = cats.map(([c,l])=>
+    `<button class="tab-btn ${c===currentFollowupCat?'active':''}" data-cat="${c}" style="border:1px solid var(--color-border);border-radius:999px;padding:8px 14px;" data-i18n="${l}">${I18N.t(l)}</button>`
+  ).join('');
+  document.querySelectorAll('#followupSubTabs .tab-btn').forEach(b=> b.addEventListener('click', ()=>{ currentFollowupCat=b.dataset.cat; renderFollowupSubTabs(); renderFollowups(); }));
+}
+function renderFollowups(){
+  const list = FOLLOWUP_DEMO.filter(f=>f.category===currentFollowupCat);
+  const wrap = document.getElementById('followupList');
+  if(!list.length){ wrap.innerHTML = `<div class="empty-state">${ICONS.empty}<div class="title" data-i18n="no_records_found">${I18N.t('no_records_found')}</div></div>`; return; }
+  wrap.innerHTML = list.map(f=>`
+    <div class="case-row-card">
+      <div class="top"><div class="name">${f.beneficiary}</div>
+        <span class="badge ${f.status==='completed'?'badge-low':f.status==='missed'?'badge-high':'badge-moderate'}">${I18N.t('fs_'+f.status)}</span>
+      </div>
+      <div class="meta-row">
+        <span>${APP.formatDate(f.date, I18N.current)}</span><span>${f.reason}</span><span>${f.worker}</span>
+      </div>
+    </div>`).join('');
+}
+
+/* ---------------- ANC ---------------- */
+function renderANC(){
+  const visits = [
+    { date:'2026-08-20', note:'BP 118/76, Hb 11.2, weight 58kg — normal', worker:'Sunita Devi' },
+    { date:'2026-07-15', note:'Routine check, iron & folic acid given', worker:'Sunita Devi' },
+    { date:'2026-06-10', note:'First ANC visit, LMP confirmed', worker:'Kavita Yadav' },
+  ];
+  document.getElementById('ancTimeline').innerHTML = visits.map((v,i)=>`
+    <div class="timeline-item">
+      <div class="timeline-dot ${i===0?'done':''}">${ICONS.check.replace('width="24" height="24"','width="13" height="13"')}</div>
+      <div><div class="timeline-title">${APP.formatDate(v.date, I18N.current)}</div>
+      <div class="timeline-meta">${v.note}</div><div class="timeline-meta">${v.worker}</div></div>
+    </div>`).join('');
+}
+
+/* ---------------- Postnatal ---------------- */
+function renderPostnatal(){
+  document.getElementById('postnatalCard').innerHTML = `
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;">
+      <div><div class="kpi-label" data-i18n="delivery_status">${I18N.t('delivery_status')}</div><div style="font-weight:700;">Institutional delivery — completed</div></div>
+      <div><div class="kpi-label" data-i18n="postnatal_visits">${I18N.t('postnatal_visits')}</div><div style="font-weight:700;">2 of 3 completed</div></div>
+    </div>
+    <div class="disclaimer-bar">${ICONS.info}<span data-i18n="risk_engine_note">${I18N.t('risk_engine_note')}</span></div>
+  `;
+}
+
+/* ---------------- Child health ---------------- */
+function renderChild(){
+  const children = [
+    { id:'CH-201', dob:'2026-03-12', weight:'2.9 kg', sex:'F', facility:'Sanganer PHC' },
+    { id:'CH-200', dob:'2026-01-28', weight:'3.1 kg', sex:'M', facility:'Chaksu CHC' },
+  ];
+  document.getElementById('childGrid').innerHTML = children.map(c=>`
+    <div class="card card-pad flex items-center justify-between" style="flex-wrap:wrap;gap:12px;">
+      <div class="flex items-center gap-3">
+        <div class="workflow-icon" style="width:44px;height:44px;">${ICONS.child}</div>
+        <div><div style="font-weight:700;">${c.id}</div><div class="text-meta">${APP.formatDate(c.dob, I18N.current)} · ${c.weight} · ${c.facility}</div></div>
+      </div>
+      <span class="badge badge-info">${c.sex}</span>
+    </div>`).join('');
+}
+
+/* ---------------- Immunization ---------------- */
+function renderImmunization(){
+  document.getElementById('immKpis').innerHTML = `
+    <div class="kpi-card"><div class="kpi-label" data-i18n="imm_completed">${I18N.t('imm_completed')}</div><div class="kpi-value">14</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="imm_upcoming">${I18N.t('imm_upcoming')}</div><div class="kpi-value">3</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="imm_due">${I18N.t('imm_due')}</div><div class="kpi-value warning">2</div></div>
+    <div class="kpi-card"><div class="kpi-label" data-i18n="imm_missed">${I18N.t('imm_missed')}</div><div class="kpi-value danger">1</div></div>
+  `;
+  const doses = [
+    { child:'CH-201', vaccine:'BCG, OPV-0, Hep B-1', due:'2026-03-12', status:'imm_completed' },
+    { child:'CH-201', vaccine:'OPV-1, Penta-1, Rota-1', due:'2026-04-23', status:'imm_completed' },
+    { child:'CH-200', vaccine:'OPV-2, Penta-2, Rota-2', due:'2026-09-08', status:'imm_due' },
+    { child:'CH-200', vaccine:'Measles-1', due:'2026-08-01', status:'imm_missed' },
+  ];
+  document.getElementById('immTableWrap').innerHTML = `<div class="table-container"><table class="data-table">
+    <thead><tr><th>${I18N.t('child_id')}</th><th>Vaccine(s)</th><th>${I18N.t('col_date')}</th><th>${I18N.t('col_status')}</th></tr></thead>
+    <tbody>${doses.map(d=>`<tr><td style="font-weight:600;">${d.child}</td><td>${d.vaccine}</td><td class="text-meta">${APP.formatDate(d.due, I18N.current)}</td>
+      <td><span class="badge ${d.status==='imm_completed'?'badge-low':d.status==='imm_missed'?'badge-high':'badge-moderate'}">${I18N.t(d.status)}</span></td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderAll(){
+  renderReferralWorkflow(); renderReferralTable(); renderFacilities();
+  renderFollowupSubTabs(); renderFollowups(); renderANC(); renderPostnatal(); renderChild(); renderImmunization();
+  I18N.apply();
+}
+document.addEventListener('langchange', renderAll);
+renderAll();
+}
+</script>
+</body>
+</html>

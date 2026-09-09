@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Dashboard | SwasthyaSaathi</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app-shell" id="appShellRoot">
+  <main class="main-content">
+    <div id="pageContent">
+      <div class="page-header">
+        <div class="flex items-center justify-between" style="flex-wrap:wrap;gap:12px;">
+          <div>
+            <h1 class="text-page-title" id="greetingTitle"></h1>
+            <p class="text-meta" id="greetingSub"></p>
+          </div>
+          <span class="demo-badge hidden" id="demoBadge"><span data-i18n="demo_data">DEMO DATA</span></span>
+        </div>
+      </div>
+
+      <div class="page-body">
+        <div id="dashboardBody"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="js/translations.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/risk-engine.js"></script>
+<script src="js/offline.js"></script>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script>
+<script>
+const session = APP.mountShell('dashboard');
+if(session){
+
+  document.getElementById('greetingTitle').textContent = `${I18N.t('good_morning')}, ${session.name.split(' ')[0]}`;
+  document.getElementById('greetingSub').textContent = I18N.t('role_'+session.role);
+  if(!SUPABASE_CONFIGURED) document.getElementById('demoBadge').classList.remove('hidden');
+
+  document.addEventListener('langchange', renderDashboard);
+  renderDashboard();
+
+  function kpiCard(label, value, cls){
+    return `<div class="kpi-card accent"><div class="kpi-label" data-i18n="${label}">${I18N.t(label)}</div><div class="kpi-value ${cls||''}">${value}</div></div>`;
+  }
+
+  function donutChart(segments, size){
+    size = size || 200;
+    const r = size/2 - 14, cx = size/2, cy = size/2, circ = 2*Math.PI*r;
+    const total = segments.reduce((a,s)=>a+s.value,0) || 1;
+    let offset = 0;
+    const arcs = segments.map(s=>{
+      const frac = s.value/total;
+      const dash = frac*circ;
+      const el = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="22"
+        stroke-dasharray="${dash} ${circ-dash}" stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})" stroke-linecap="butt"/>`;
+      offset += dash;
+      return el;
+    }).join('');
+    return `<svg viewBox="0 0 ${size} ${size}" style="max-width:220px;margin:0 auto;display:block;">
+      ${arcs}
+      <text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="24" font-weight="800" fill="var(--color-text)">${total}</text>
+      <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="11" fill="var(--color-text-secondary)">Total</text>
+    </svg>`;
+  }
+
+  function barChart(bars, opts){
+    opts = opts || {};
+    const w = 480, h = opts.h || 200, pad = 28, barW = (w-pad*2)/bars.length*0.55;
+    const max = Math.max(...bars.map(b=>b.value), 1);
+    const gap = (w-pad*2)/bars.length;
+    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;">
+      <line x1="${pad}" y1="${h-24}" x2="${w-8}" y2="${h-24}" stroke="var(--color-border)"/>
+      ${bars.map((b,i)=>{
+        const bh = (h-50)*(b.value/max);
+        const x = pad + i*gap + (gap-barW)/2;
+        const y = h-24-bh;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" rx="4" fill="${b.color||'var(--color-primary)'}"/>
+          <text x="${x+barW/2}" y="${h-8}" text-anchor="middle" font-size="10.5" fill="var(--color-text-secondary)">${b.label}</text>
+          <text x="${x+barW/2}" y="${y-6}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--color-text)">${b.value}</text>`;
+      }).join('')}
+    </svg>`;
+  }
+
+  function caseRowHTML(c){
+    return `<tr class="row-link" onclick="window.location.href='cases.html?case=${c.id}'">
+      <td style="font-weight:600;">${c.id}</td>
+      <td>${c.name}</td>
+      <td>${c.week} ${I18N.t('week_short')}</td>
+      <td>${APP.riskBadge(c.risk)}</td>
+      <td><span class="badge badge-neutral">${c.referral==='—'?'—':I18N.t('status_'+c.referral)}</span></td>
+      <td class="text-meta">${APP.formatDate(c.followup, I18N.current)}</td>
+    </tr>`;
+  }
+
+  function recentCasesTable(cases){
+    if(!cases.length){
+      return `<div class="empty-state">${ICONS.empty}<div class="title" data-i18n="no_records_found">${I18N.t('no_records_found')}</div></div>`;
+    }
+    return `<div class="table-container">
+      <table class="data-table">
+        <thead><tr>
+          <th data-i18n="col_case_id">${I18N.t('col_case_id')}</th>
+          <th data-i18n="col_beneficiary">${I18N.t('col_beneficiary')}</th>
+          <th data-i18n="col_week">${I18N.t('col_week')}</th>
+          <th data-i18n="col_risk">${I18N.t('col_risk')}</th>
+          <th data-i18n="col_referral">${I18N.t('col_referral')}</th>
+          <th data-i18n="col_followup">${I18N.t('col_followup')}</th>
+        </tr></thead>
+        <tbody>${cases.map(caseRowHTML).join('')}</tbody>
+      </table>
+    </div>`;
+  }
+
+  function quickActionsHTML(){
+    const actions = [
+      {icon:'pregnancy', label:'action_new_pregnancy', href:'pregnancy.html'},
+      {icon:'followups', label:'action_today_visits', href:'referrals.html#followups'},
+      {icon:'cases', label:'action_high_risk', href:'cases.html?risk=high'},
+      {icon:'referrals', label:'action_referrals', href:'referrals.html'},
+    ];
+    return `<div class="grid" style="grid-template-columns:repeat(2,1fr);">
+      ${actions.map(a=>`
+        <a href="${a.href}" class="card card-pad flex items-center gap-3" style="transition:box-shadow .15s;">
+          <div class="workflow-icon" style="width:40px;height:40px;">${ICONS[a.icon]}</div>
+          <span style="font-weight:600;font-size:13.5px;" data-i18n="${a.label}">${I18N.t(a.label)}</span>
+        </a>`).join('')}
+    </div>`;
+  }
+
+  async function renderDashboard(){
+    const body = document.getElementById('dashboardBody');
+    body.innerHTML = `<div class="skeleton" style="height:120px;margin-bottom:20px;"></div><div class="skeleton" style="height:280px;"></div>`;
+
+    // In a fully wired deployment this reads from Supabase (beneficiaries,
+    // pregnancies, risk_assessments, referrals, followups) filtered by RLS
+    // to the worker's assigned area / block / district. DEMO_DATA below
+    // stands in when Supabase is not configured, purely for evaluation.
+    const cases = window.DEMO_DATA.cases;
+    const high = cases.filter(c=>c.risk==='high').length;
+    const mod = cases.filter(c=>c.risk==='moderate').length;
+    const low = cases.filter(c=>c.risk==='low').length;
+    const pendingReferrals = cases.filter(c=>c.referral==='pending' || c.referral==='referred').length;
+
+    let html = '';
+
+    if(session.role === 'asha' || session.role === 'anm'){
+      html += `<div class="kpi-grid" style="margin-bottom:24px;">
+        ${kpiCard('kpi_registered', cases.length)}
+        ${kpiCard('kpi_high_risk', high, 'danger')}
+        ${kpiCard('kpi_pending_referrals', pendingReferrals, 'warning')}
+        ${kpiCard('kpi_followups_due', 4)}
+      </div>
+      <div class="grid" style="grid-template-columns:1fr;margin-bottom:28px;">
+        <div>
+          <h2 class="text-section-title" style="margin-bottom:12px;" data-i18n="quick_actions">${I18N.t('quick_actions')}</h2>
+          ${quickActionsHTML()}
+        </div>
+      </div>
+      <div class="flex items-center justify-between" style="margin-bottom:12px;">
+        <h2 class="text-section-title" data-i18n="recent_cases">${I18N.t('recent_cases')}</h2>
+        <a href="cases.html" class="text-meta" style="color:var(--color-primary-dark);font-weight:600;" data-i18n="view_all">${I18N.t('view_all')}</a>
+      </div>
+      ${recentCasesTable(cases.slice(0,5))}`;
+    }
+
+    if(session.role === 'medical_officer'){
+      html += `<div class="kpi-grid" style="margin-bottom:24px;">
+        ${kpiCard('kpi_high_risk', high, 'danger')}
+        ${kpiCard('kpi_pending_reviews', 3, 'warning')}
+        ${kpiCard('kpi_pending_referrals', pendingReferrals)}
+        ${kpiCard('kpi_followups_due', 4)}
+      </div>
+      <h2 class="text-section-title" style="margin-bottom:12px;" data-i18n="kpi_high_risk">${I18N.t('kpi_high_risk')}</h2>
+      ${recentCasesTable(cases.filter(c=>c.risk==='high'))}`;
+    }
+
+    if(session.role === 'block_officer' || session.role === 'district_officer'){
+      const isDistrict = session.role === 'district_officer';
+      html += `<div class="kpi-grid" style="margin-bottom:24px;">
+        ${kpiCard('kpi_total_pregnancies', cases.length)}
+        ${kpiCard('kpi_high_risk', high, 'danger')}
+        ${kpiCard('kpi_moderate_risk', mod, 'warning')}
+        ${isDistrict ? kpiCard('kpi_low_risk', low) : kpiCard('kpi_pending_referrals', pendingReferrals, 'warning')}
+      </div>
+      <div class="grid" style="grid-template-columns:1fr;gap:20px;margin-bottom:28px;">
+        <div class="card card-pad">
+          <h3 class="text-section-title" style="margin-bottom:14px;" data-i18n="risk_distribution">${I18N.t('risk_distribution')}</h3>
+          <div class="chart-container">${donutChart([
+            {value:high,color:'var(--color-danger)'},{value:mod,color:'var(--color-warning)'},{value:low,color:'var(--color-success)'}
+          ])}</div>
+          <div class="chart-legend" style="justify-content:center;">
+            <span class="legend-item"><span class="legend-dot" style="background:var(--color-danger)"></span>${I18N.t('risk_high')}</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--color-warning)"></span>${I18N.t('risk_moderate')}</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--color-success)"></span>${I18N.t('risk_low')}</span>
+          </div>
+        </div>
+        <div class="card card-pad">
+          <h3 class="text-section-title" style="margin-bottom:14px;" data-i18n="${isDistrict?'block_comparison':'block_referral_overview'}">${I18N.t(isDistrict?'block_comparison':'block_referral_overview')}</h3>
+          <div class="chart-container">${barChart([
+            {label:'Sanganer', value:14, color:'var(--color-primary)'},
+            {label:'Chaksu', value:9, color:'var(--color-primary)'},
+            {label:'Amber', value:6, color:'var(--color-primary)'},
+            {label:'Bassi', value:11, color:'var(--color-primary)'},
+          ])}</div>
+        </div>
+      </div>
+      <h2 class="text-section-title" style="margin-bottom:12px;" data-i18n="kpi_high_risk">${I18N.t('kpi_high_risk')}</h2>
+      ${recentCasesTable(cases.filter(c=>c.risk!=='low'))}`;
+    }
+
+    body.innerHTML = html;
+    I18N.apply(body);
+  }
+}
+</script>
+</body>
+</html>
